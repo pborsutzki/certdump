@@ -14,7 +14,10 @@ import socket
 import ssl
 import cryptography
 import json
-from pprint import pprint
+
+import traceback
+
+from OpenSSL import SSL as ossl
 
 ### Create FastAPI instance with custom docs and openapi url
 app = FastAPI(
@@ -38,15 +41,30 @@ def dump_certs(host: str, port: int = 443):
         }
 
         chain_der = []
-        ctx = ssl.create_default_context()
-        with ctx.wrap_socket(socket.create_connection((host, port)), server_hostname=host) as ssock:
-            #ssock.connect((host, port))
-            chain_der += ssock.get_unverified_chain()
-            result['ip'] = ssock.getpeername()[0]
-            ssock.close()
+        # requires python 3.13, vercel only supports 3.12 at the time of writing.
+#        ctx = ssl.create_default_context()
+#
+#        with ctx.wrap_socket(socket.create_connection((host, port)), server_hostname=host) as ssock:
+#            chain_der += ssock.get_unverified_chain()
+#            result['ip'] = ssock.getpeername()[0]
+#            ssock.close()
+
+        # Use OpenSSL pip package to get certificate chain instead:
+        ctx = ossl.Context(ossl.TLS_CLIENT_METHOD)
+        sock = socket.create_connection((host, port))
+        conn = ossl.Connection(ctx, sock)
+        conn.set_tlsext_host_name(host.encode())
+        conn.set_connect_state()
+        conn.do_handshake()
+        result['ip'] = str(sock.getpeername()[0])
+        chain_der = conn.get_peer_cert_chain(as_cryptography=True)
+        conn.close()
 
         for cert_der in chain_der:
-            cert = cryptography.x509.load_der_x509_certificate(cert_der)
+            if isinstance(cert_der, cryptography.x509.Certificate):
+                cert = cert_der
+            else:
+                cert = cryptography.x509.load_der_x509_certificate(cert_der)
 
             pub_key = cert.public_key()
             algo_name = 'unknown'
@@ -80,7 +98,7 @@ def dump_certs(host: str, port: int = 443):
                     'algorithm': cert.signature_algorithm_oid._name,
                 },
                 'raw': {
-                    'der': cert_der.hex(),
+                    'der': cert.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.DER).hex(),
                     'pem': cert.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.PEM).decode()
                 }
             }
@@ -92,7 +110,7 @@ def dump_certs(host: str, port: int = 443):
             result['certificate_chain'].append(cert_info)
 
     except Exception as e:
-        result = { 'error': str(e) }
+        result = { 'error': str(e), 'traceback': traceback.format_exception(e) }
 
     return Response(
         media_type='application/json',
