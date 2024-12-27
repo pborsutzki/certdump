@@ -114,5 +114,6 @@ def dump_certs(host: str, port: int = 443):
 
     return Response(
         media_type='application/json',
+        status_code=400,
         content=json.dumps(result)
     )
