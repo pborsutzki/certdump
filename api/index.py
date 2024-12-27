@@ -19,10 +19,18 @@ import traceback
 
 from OpenSSL import SSL as ossl
 
+from fastapi.middleware.cors import CORSMiddleware
+
 ### Create FastAPI instance with custom docs and openapi url
 app = FastAPI(
     docs_url="/api/py/docs",
     openapi_url="/api/py/openapi.json")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_methods=['*'],
+    allow_headers=['*'])
 
 @app.get("/api/py/v1/dumpCerts")
 def dump_certs(host: str, port: int = 443):
@@ -33,6 +41,7 @@ def dump_certs(host: str, port: int = 443):
         'ip': None,
         'certificate_chain': []
     }
+    status = 200
     try:
         cryptography.hazmat.primitives.asymmetric.types.PublicKeyTypes
         algorithms = {
@@ -111,9 +120,10 @@ def dump_certs(host: str, port: int = 443):
 
     except Exception as e:
         result = { 'error': str(e), 'traceback': traceback.format_exception(e) }
+        status = 400
 
     return Response(
         media_type='application/json',
-        status_code=400,
+        status_code=status,
         content=json.dumps(result)
     )
