@@ -1,12 +1,17 @@
 # About
 
-This project provides a simple certificate chain dump API endpoint for any given host on a port.
-The necessity of this project stems from nowadays client side JavaScript missing the functinality to retrieve this information natively.
+This project provides a rather simple API endpoint for certificate chain dumping from any reachable
+SSL/TLS host.
+The necessity of this project stems from current client side JavaScript implementations missing the
+functionality to retrieve this information natively.
+This API endpoint aims to fill this gap.
 
 # Requirements
 
-* Node >= 20
-* Python >= 3.12
+* Node.js 20
+* Python 3.12
+
+Older or newer versions might work as well, I just didn't try.
 
 # Usage
 
@@ -17,20 +22,67 @@ The necessity of this project stems from nowadays client side JavaScript missing
 
 ## Run
 
-Run by typing `npm run dev`. If that results in python not found errors, run `npm run next-dev` and `npm run python-dev` in two separate shells.
+Run by typing `npm run dev`. If that results in python not found errors, try running `npm run next-dev` and `npm run python-dev` in two separate shells.
 
-## Use
+## Queries
 
-Afterwards you can query the certificate chain for a host using this URL:
+You can query the certificate chain for a host using this URL:
 
     http://localhost:3000/api/py/v1/dumpCerts?host=<hostname>
 
-You can also pass a port and an IP for the connection, if omitted the port will default to 443 and
+The result will be a JSON document containing the complete certificate chain if the connection succeeded.
+See the [Example](#example) section for exemplary output.
+
+You can also pass a port and an IP address (v4/v6) for the connection, if omitted the port will default to 443 and
 the IP will be retrieved through DNS:
 
     http://localhost:3000/api/py/v1/dumpCerts?host=<hostname>&port=<port>&ip=<ip>
 
-The result is a json document and will look like this for this query `http://localhost:3000/api/py/v1/dumpCerts?host=letsencrypt.org` on [Let's Encrypt](http://letsencrypt.org):
+Note that the result certificates `extensions` structure is strongly tied to pythons cryptography library internals
+and thus may vary between python versions.
+In case you need to rely on any of these it might make sense to change their output to a fixed format.
+
+Note that no requests (besides the initialization of the SSL/TLS connection) will be sent to or accepted from the host.
+The connection will be closed directly after the SSL/TLS handshake.
+
+## Encoding
+
+Hostnames using URL-escaped UTF-8 and Punicode encodings are supported, e.g.
+
+    http://localhost:3000/api/py/v1/dumpCerts?host=m%C3%BCnchen.de
+    http://localhost:3000/api/py/v1/dumpCerts?host=xn--mnchen-3ya.de
+
+## Ciphers
+
+You can select the accepted ciphers by adding a `ciphers` parameter to the query:
+
+    http://localhost:3000/api/py/v1/dumpCerts?host=github.com&ciphers=aRSA:aECDSA
+
+Use a colon separated cipher list like it is returned from `openssl ciphers` or documented on the [`ciphers` man page](https://linux.die.net/man/1/ciphers).
+
+Note that the use of this parameter currently disables the use of TLS 1.3 (pyOpenSSL is currently missing the required functionality to set the ciphersuite for TLS 1.3, see [here](https://github.com/pyca/pyopenssl/issues/1224)).
+
+## Other
+
+Automatically generated API documentation is provided under `http://localhost:3000/api/py/docs`
+
+Machine readable API documentation is provided under `http://localhost:3000/api/py/openapi.json` in the [OpenAPI](https://github.com/OAI/OpenAPI-Specification) format.
+
+## Validation
+
+Certificate validation is disabled. The returned certificates are NOT VALIDATED.
+
+## CORS
+
+CORS headers are set to accept anything, so that the API is easily usable from other domains without CORS trouble.
+
+## License
+
+Find a copy of the three-clause BSD license in [LICENSE](LICENSE).
+
+## Example
+
+The result is a json document and will look like the follwing for the query `http://localhost:3000/api/py/v1/dumpCerts?host=letsencrypt.org` on [Let's Encrypt](http://letsencrypt.org):
 ``` json
 {
   "api-version": "1",
@@ -51,7 +103,14 @@ The result is a json document and will look like this for this query `http://loc
         "bits": 256,
         "key-der": "3059301306072a8648ce3d020106082a8648ce3d0301070342000438071da21e33063300f3bd6607de19a9ec51e151374b16e0adb79eb569a515df8c7bcdfbcdefb47d7bd21b210ab2006512422fe08f700d8d52a98b89274cfccf",
         "key-pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOAcdoh4zBjMA871mB94ZqexR4VE3\nSxbgrbeetWmlFd+Me837ze+0fXvSGyEKsgBlEkIv4I9wDY1SqYuJJ0z8zw==\n-----END PUBLIC KEY-----\n",
-        "algorithm": "Elliptic Curve"
+        "algorithm": "Elliptic Curve",
+        "details": {
+          "curve": {
+            "key-size": "256",
+            "name": "secp256r1"
+          },
+          "key-size": "256"
+        }
       },
       "not-valid-before-utc": "2024-12-07 14:44:05+00:00",
       "not-valid-after-utc": "2025-03-07 14:44:04+00:00",
@@ -73,168 +132,224 @@ The result is a json document and will look like this for this query `http://loc
       },
       "extensions": [
         {
-          "public-bytes": "03020780",
-          "content-commitment": "False",
-          "crl-sign": "False",
-          "data-encipherment": "False",
-          "decipher-only": "False",
-          "digital-signature": "True",
-          "encipher-only": "False",
-          "key-agreement": "False",
-          "key-cert-sign": "False",
-          "key-encipherment": "False",
+          "critical": "True",
           "oid": {
             "oid-dotted": "2.5.29.15",
             "oid-name": "keyUsage"
+          },
+          "value": {
+            "content-commitment": "False",
+            "crl-sign": "False",
+            "data-encipherment": "False",
+            "decipher-only": "False",
+            "digital-signature": "True",
+            "encipher-only": "False",
+            "key-agreement": "False",
+            "key-cert-sign": "False",
+            "key-encipherment": "False",
+            "oid": {
+              "oid-dotted": "2.5.29.15",
+              "oid-name": "keyUsage"
+            }
           }
         },
         {
-          "public-bytes": "301406082b0601050507030106082b06010505070302",
-          "usages": [
-            {
-              "oid-dotted": "1.3.6.1.5.5.7.3.1",
-              "oid-name": "serverAuth"
-            },
-            {
-              "oid-dotted": "1.3.6.1.5.5.7.3.2",
-              "oid-name": "clientAuth"
-            }
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.37",
             "oid-name": "extendedKeyUsage"
+          },
+          "value": {
+            "usages": [
+              {
+                "oid-dotted": "1.3.6.1.5.5.7.3.1",
+                "oid-name": "serverAuth"
+              },
+              {
+                "oid-dotted": "1.3.6.1.5.5.7.3.2",
+                "oid-name": "clientAuth"
+              }
+            ],
+            "oid": {
+              "oid-dotted": "2.5.29.37",
+              "oid-name": "extendedKeyUsage"
+            }
           }
         },
         {
-          "public-bytes": "3000",
-          "ca": "False",
-          "path-length": "None",
+          "critical": "True",
           "oid": {
             "oid-dotted": "2.5.29.19",
             "oid-name": "basicConstraints"
+          },
+          "value": {
+            "ca": "False",
+            "path-length": "None",
+            "oid": {
+              "oid-dotted": "2.5.29.19",
+              "oid-name": "basicConstraints"
+            }
           }
         },
         {
-          "public-bytes": "04143d8c2ed727c0158c16e91c5f8c0c7d8090502300",
-          "digest": "3d8c2ed727c0158c16e91c5f8c0c7d8090502300",
-          "key-identifier": "3d8c2ed727c0158c16e91c5f8c0c7d8090502300",
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.14",
             "oid-name": "subjectKeyIdentifier"
+          },
+          "value": {
+            "digest": "3d8c2ed727c0158c16e91c5f8c0c7d8090502300",
+            "key-identifier": "3d8c2ed727c0158c16e91c5f8c0c7d8090502300",
+            "oid": {
+              "oid-dotted": "2.5.29.14",
+              "oid-name": "subjectKeyIdentifier"
+            }
           }
         },
         {
-          "public-bytes": "301680149327469803a951688e98d6c44248db23bf5894d2",
-          "authority-cert-issuer": "None",
-          "authority-cert-serial-number": "None",
-          "key-identifier": "9327469803a951688e98d6c44248db23bf5894d2",
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.35",
             "oid-name": "authorityKeyIdentifier"
+          },
+          "value": {
+            "authority-cert-issuer": "None",
+            "authority-cert-serial-number": "None",
+            "key-identifier": "9327469803a951688e98d6c44248db23bf5894d2",
+            "oid": {
+              "oid-dotted": "2.5.29.35",
+              "oid-name": "authorityKeyIdentifier"
+            }
           }
         },
         {
-          "public-bytes": "3047302106082b060105050730018615687474703a2f2f65362e6f2e6c656e63722e6f7267302206082b060105050730028616687474703a2f2f65362e692e6c656e63722e6f72672f",
-          "descriptions": [
-            {
-              "AccessDescription": {
-                "method": {
-                  "oid-dotted": "1.3.6.1.5.5.7.48.1",
-                  "oid-name": "OCSP"
-                },
-                "location": "http://e6.o.lencr.org"
-              }
-            },
-            {
-              "AccessDescription": {
-                "method": {
-                  "oid-dotted": "1.3.6.1.5.5.7.48.2",
-                  "oid-name": "caIssuers"
-                },
-                "location": "http://e6.i.lencr.org/"
-              }
-            }
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "1.3.6.1.5.5.7.1.1",
             "oid-name": "authorityInfoAccess"
+          },
+          "value": {
+            "descriptions": [
+              {
+                "AccessDescription": {
+                  "method": {
+                    "oid-dotted": "1.3.6.1.5.5.7.48.1",
+                    "oid-name": "OCSP"
+                  },
+                  "location": "http://e6.o.lencr.org"
+                }
+              },
+              {
+                "AccessDescription": {
+                  "method": {
+                    "oid-dotted": "1.3.6.1.5.5.7.48.2",
+                    "oid-name": "caIssuers"
+                  },
+                  "location": "http://e6.i.lencr.org/"
+                }
+              }
+            ],
+            "oid": {
+              "oid-dotted": "1.3.6.1.5.5.7.1.1",
+              "oid-name": "authorityInfoAccess"
+            }
           }
         },
         {
-          "public-bytes": "306682096c656e63722e6f7267820f6c657473656e63727970742e636f6d820f6c657473656e63727970742e6f7267820d7777772e6c656e63722e6f726782137777772e6c657473656e63727970742e636f6d82137777772e6c657473656e63727970742e6f7267",
-          "general-names": [
-            "lencr.org",
-            "letsencrypt.com",
-            "letsencrypt.org",
-            "www.lencr.org",
-            "www.letsencrypt.com",
-            "www.letsencrypt.org"
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.17",
             "oid-name": "subjectAltName"
+          },
+          "value": {
+            "general-names": {
+              "general-names": [
+                "lencr.org",
+                "letsencrypt.com",
+                "letsencrypt.org",
+                "www.lencr.org",
+                "www.letsencrypt.com",
+                "www.letsencrypt.org"
+              ]
+            },
+            "oid": {
+              "oid-dotted": "2.5.29.17",
+              "oid-name": "subjectAltName"
+            }
           }
         },
         {
-          "public-bytes": "300a3008060667810c010201",
-          "policies": [
-            {
-              "policy-identifier": {
-                "oid-dotted": "2.23.140.1.2.1"
-              },
-              "policy-qualifiers": "None"
-            }
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.32",
             "oid-name": "certificatePolicies"
+          },
+          "value": {
+            "policies": [
+              {
+                "policy-identifier": {
+                  "oid-dotted": "2.23.140.1.2.1"
+                },
+                "policy-qualifiers": "None"
+              }
+            ],
+            "oid": {
+              "oid-dotted": "2.5.29.32",
+              "oid-name": "certificatePolicies"
+            }
           }
         },
         {
-          "public-bytes": "0481f200f00076007d591e12e1782a7b1c61677c5efdf8d0875c14a04e959eb9032fd90e8c2e79b800000193a1c9787d0000040300473045022005e855cd0144ae842cbd10d651eff906eba1b9c188fb6172bd84ee0d08ba590702210095592256417deca791fc0b775dd24d4586c975ad2229a2ada8acb4287ee28198007600134adf1ab5984209780c6fef4c7a91a416b72349ce58576adfaedaa7c2abe02200000193a1c979340000040300473045022100feca19bfea5c0c316cb105a075e4c921837b6c402b6bd03383e2ebc0cdceb71402201e08d776e1826c1ff7553b5108659f9a45924bdcfe0a37ced4eea19331965c1a",
-          "signed-certificate-timestamps": [
-            {
-              "entry-type": {
-                "name": "PRE_CERTIFICATE",
-                "value": "1"
-              },
-              "extension-bytes": "",
-              "log-id": "7d591e12e1782a7b1c61677c5efdf8d0875c14a04e959eb9032fd90e8c2e79b8",
-              "signature": "3045022005e855cd0144ae842cbd10d651eff906eba1b9c188fb6172bd84ee0d08ba590702210095592256417deca791fc0b775dd24d4586c975ad2229a2ada8acb4287ee28198",
-              "signature-algorithm": {
-                "name": "ECDSA",
-                "value": "3"
-              },
-              "signature-hash-algorithm": "sha256",
-              "timestamp": "2024-12-07 15:42:35.645000",
-              "version": {
-                "name": "v1",
-                "value": "0"
-              }
-            },
-            {
-              "entry-type": {
-                "name": "PRE_CERTIFICATE",
-                "value": "1"
-              },
-              "extension-bytes": "",
-              "log-id": "134adf1ab5984209780c6fef4c7a91a416b72349ce58576adfaedaa7c2abe022",
-              "signature": "3045022100feca19bfea5c0c316cb105a075e4c921837b6c402b6bd03383e2ebc0cdceb71402201e08d776e1826c1ff7553b5108659f9a45924bdcfe0a37ced4eea19331965c1a",
-              "signature-algorithm": {
-                "name": "ECDSA",
-                "value": "3"
-              },
-              "signature-hash-algorithm": "sha256",
-              "timestamp": "2024-12-07 15:42:35.828000",
-              "version": {
-                "name": "v1",
-                "value": "0"
-              }
-            }
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "1.3.6.1.4.1.11129.2.4.2",
             "oid-name": "signedCertificateTimestampList"
+          },
+          "value": {
+            "signed-certificate-timestamps": [
+              {
+                "entry-type": {
+                  "name": "PRE_CERTIFICATE",
+                  "value": "1"
+                },
+                "extension-bytes": "",
+                "log-id": "7d591e12e1782a7b1c61677c5efdf8d0875c14a04e959eb9032fd90e8c2e79b8",
+                "signature": "3045022005e855cd0144ae842cbd10d651eff906eba1b9c188fb6172bd84ee0d08ba590702210095592256417deca791fc0b775dd24d4586c975ad2229a2ada8acb4287ee28198",
+                "signature-algorithm": {
+                  "name": "ECDSA",
+                  "value": "3"
+                },
+                "signature-hash-algorithm": "sha256",
+                "timestamp": "2024-12-07 15:42:35.645000",
+                "version": {
+                  "name": "v1",
+                  "value": "0"
+                }
+              },
+              {
+                "entry-type": {
+                  "name": "PRE_CERTIFICATE",
+                  "value": "1"
+                },
+                "extension-bytes": "",
+                "log-id": "134adf1ab5984209780c6fef4c7a91a416b72349ce58576adfaedaa7c2abe022",
+                "signature": "3045022100feca19bfea5c0c316cb105a075e4c921837b6c402b6bd03383e2ebc0cdceb71402201e08d776e1826c1ff7553b5108659f9a45924bdcfe0a37ced4eea19331965c1a",
+                "signature-algorithm": {
+                  "name": "ECDSA",
+                  "value": "3"
+                },
+                "signature-hash-algorithm": "sha256",
+                "timestamp": "2024-12-07 15:42:35.828000",
+                "version": {
+                  "name": "v1",
+                  "value": "0"
+                }
+              }
+            ],
+            "oid": {
+              "oid-dotted": "1.3.6.1.4.1.11129.2.4.2",
+              "oid-name": "signedCertificateTimestampList"
+            }
           }
         }
       ]
@@ -250,7 +365,14 @@ The result is a json document and will look like this for this query `http://loc
         "bits": 384,
         "key-der": "3076301006072a8648ce3d020106052b8104002203620004d9f19e4687f8217160a826eba3fab9eada1db912a7d426d95114b1617c7596bf220b391fd5bed10a46aa2d3c4a09842ebe409555e91940376675ed324e770449f8707bc318e7cef77110feac74d800d4ed6d1c731633109c3ab2ea6c62f4bdb8",
         "key-pem": "-----BEGIN PUBLIC KEY-----\nMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE2fGeRof4IXFgqCbro/q56toduRKn1CbZ\nURSxYXx1lr8iCzkf1b7RCkaqLTxKCYQuvkCVVekZQDdmde0yTncESfhwe8MY5873\ncRD+rHTYANTtbRxzFjMQnDqy6mxi9L24\n-----END PUBLIC KEY-----\n",
-        "algorithm": "Elliptic Curve"
+        "algorithm": "Elliptic Curve",
+        "details": {
+          "curve": {
+            "key-size": "384",
+            "name": "secp384r1"
+          },
+          "key-size": "384"
+        }
       },
       "not-valid-before-utc": "2024-03-13 00:00:00+00:00",
       "not-valid-after-utc": "2027-03-12 23:59:59+00:00",
@@ -274,114 +396,162 @@ The result is a json document and will look like this for this query `http://loc
       },
       "extensions": [
         {
-          "public-bytes": "03020186",
-          "content-commitment": "False",
-          "crl-sign": "True",
-          "data-encipherment": "False",
-          "decipher-only": "False",
-          "digital-signature": "True",
-          "encipher-only": "False",
-          "key-agreement": "False",
-          "key-cert-sign": "True",
-          "key-encipherment": "False",
+          "critical": "True",
           "oid": {
             "oid-dotted": "2.5.29.15",
             "oid-name": "keyUsage"
+          },
+          "value": {
+            "content-commitment": "False",
+            "crl-sign": "True",
+            "data-encipherment": "False",
+            "decipher-only": "False",
+            "digital-signature": "True",
+            "encipher-only": "False",
+            "key-agreement": "False",
+            "key-cert-sign": "True",
+            "key-encipherment": "False",
+            "oid": {
+              "oid-dotted": "2.5.29.15",
+              "oid-name": "keyUsage"
+            }
           }
         },
         {
-          "public-bytes": "301406082b0601050507030206082b06010505070301",
-          "usages": [
-            {
-              "oid-dotted": "1.3.6.1.5.5.7.3.2",
-              "oid-name": "clientAuth"
-            },
-            {
-              "oid-dotted": "1.3.6.1.5.5.7.3.1",
-              "oid-name": "serverAuth"
-            }
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.37",
             "oid-name": "extendedKeyUsage"
+          },
+          "value": {
+            "usages": [
+              {
+                "oid-dotted": "1.3.6.1.5.5.7.3.2",
+                "oid-name": "clientAuth"
+              },
+              {
+                "oid-dotted": "1.3.6.1.5.5.7.3.1",
+                "oid-name": "serverAuth"
+              }
+            ],
+            "oid": {
+              "oid-dotted": "2.5.29.37",
+              "oid-name": "extendedKeyUsage"
+            }
           }
         },
         {
-          "public-bytes": "30060101ff020100",
-          "ca": "True",
-          "path-length": "0",
+          "critical": "True",
           "oid": {
             "oid-dotted": "2.5.29.19",
             "oid-name": "basicConstraints"
+          },
+          "value": {
+            "ca": "True",
+            "path-length": "0",
+            "oid": {
+              "oid-dotted": "2.5.29.19",
+              "oid-name": "basicConstraints"
+            }
           }
         },
         {
-          "public-bytes": "04149327469803a951688e98d6c44248db23bf5894d2",
-          "digest": "9327469803a951688e98d6c44248db23bf5894d2",
-          "key-identifier": "9327469803a951688e98d6c44248db23bf5894d2",
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.14",
             "oid-name": "subjectKeyIdentifier"
+          },
+          "value": {
+            "digest": "9327469803a951688e98d6c44248db23bf5894d2",
+            "key-identifier": "9327469803a951688e98d6c44248db23bf5894d2",
+            "oid": {
+              "oid-dotted": "2.5.29.14",
+              "oid-name": "subjectKeyIdentifier"
+            }
           }
         },
         {
-          "public-bytes": "3016801479b459e67bb6e5e40173800888c81a58f6e99b6e",
-          "authority-cert-issuer": "None",
-          "authority-cert-serial-number": "None",
-          "key-identifier": "79b459e67bb6e5e40173800888c81a58f6e99b6e",
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.35",
             "oid-name": "authorityKeyIdentifier"
+          },
+          "value": {
+            "authority-cert-issuer": "None",
+            "authority-cert-serial-number": "None",
+            "key-identifier": "79b459e67bb6e5e40173800888c81a58f6e99b6e",
+            "oid": {
+              "oid-dotted": "2.5.29.35",
+              "oid-name": "authorityKeyIdentifier"
+            }
           }
         },
         {
-          "public-bytes": "3024302206082b060105050730028616687474703a2f2f78312e692e6c656e63722e6f72672f",
-          "descriptions": [
-            {
-              "AccessDescription": {
-                "method": {
-                  "oid-dotted": "1.3.6.1.5.5.7.48.2",
-                  "oid-name": "caIssuers"
-                },
-                "location": "http://x1.i.lencr.org/"
-              }
-            }
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "1.3.6.1.5.5.7.1.1",
             "oid-name": "authorityInfoAccess"
+          },
+          "value": {
+            "descriptions": [
+              {
+                "AccessDescription": {
+                  "method": {
+                    "oid-dotted": "1.3.6.1.5.5.7.48.2",
+                    "oid-name": "caIssuers"
+                  },
+                  "location": "http://x1.i.lencr.org/"
+                }
+              }
+            ],
+            "oid": {
+              "oid-dotted": "1.3.6.1.5.5.7.1.1",
+              "oid-name": "authorityInfoAccess"
+            }
           }
         },
         {
-          "public-bytes": "300a3008060667810c010201",
-          "policies": [
-            {
-              "policy-identifier": {
-                "oid-dotted": "2.23.140.1.2.1"
-              },
-              "policy-qualifiers": "None"
-            }
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.32",
             "oid-name": "certificatePolicies"
+          },
+          "value": {
+            "policies": [
+              {
+                "policy-identifier": {
+                  "oid-dotted": "2.23.140.1.2.1"
+                },
+                "policy-qualifiers": "None"
+              }
+            ],
+            "oid": {
+              "oid-dotted": "2.5.29.32",
+              "oid-name": "certificatePolicies"
+            }
           }
         },
         {
-          "public-bytes": "301e301ca01aa0188616687474703a2f2f78312e632e6c656e63722e6f72672f",
-          "distribution-points": [
-            {
-              "crl-issuer": "None",
-              "full-name": [
-                "http://x1.c.lencr.org/"
-              ],
-              "reasons": "None",
-              "relative-name": "None"
-            }
-          ],
+          "critical": "False",
           "oid": {
             "oid-dotted": "2.5.29.31",
             "oid-name": "cRLDistributionPoints"
+          },
+          "value": {
+            "distribution-points": [
+              {
+                "crl-issuer": "None",
+                "full-name": [
+                  "http://x1.c.lencr.org/"
+                ],
+                "reasons": "None",
+                "relative-name": "None"
+              }
+            ],
+            "oid": {
+              "oid-dotted": "2.5.29.31",
+              "oid-name": "cRLDistributionPoints"
+            }
           }
         }
       ]
@@ -389,31 +559,3 @@ The result is a json document and will look like this for this query `http://loc
   ]
 }
 ```
-
-## Ciphers
-
-You can select the allowed ciphers by adding a `ciphers` parameter:
-
-    http://localhost:3000/api/py/v1/dumpCerts?host=github.com&ciphers=aRSA
-
-You can use a colon separated cipher lists as they are e.g. returned by `openssl ciphers` or documented on the [`ciphers` man page](https://linux.die.net/man/1/ciphers).
-
-Note that the use of this parameter currently disables the use of TLS 1.3.
-
-## Other
-
-Automatically generated API documentation is provided under `http://localhost:3000/api/py/docs`.
-
-Machine readable API documentation is provided under `http://localhost:3000/api/py/openapi.json` in the [OpenAPI](https://github.com/OAI/OpenAPI-Specification) format.
-
-## Validation
-
-Certificates are NOT VALIDATED. This tool just wants to print them.
-
-## CORS
-
-CORS headers are set to accept anything, so the API is easily usable from other domains without CORS trouble.
-
-## License
-
-Find a copy of the three-clause BSD license in [LICENSE](LICENSE).

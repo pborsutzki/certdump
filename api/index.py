@@ -3,9 +3,15 @@ import cryptography.hazmat.bindings
 import cryptography.hazmat.bindings.openssl
 import cryptography.hazmat.primitives
 import cryptography.hazmat.primitives.asymmetric
+import cryptography.hazmat.primitives.asymmetric.dh
+import cryptography.hazmat.primitives.asymmetric.dsa
 import cryptography.hazmat.primitives.asymmetric.ec
+import cryptography.hazmat.primitives.asymmetric.ed25519
+import cryptography.hazmat.primitives.asymmetric.ed448
 import cryptography.hazmat.primitives.asymmetric.rsa
 import cryptography.hazmat.primitives.asymmetric.types
+import cryptography.hazmat.primitives.asymmetric.x25519
+import cryptography.hazmat.primitives.asymmetric.x448
 import cryptography.hazmat.primitives.hashes
 import cryptography.hazmat.primitives.serialization
 import cryptography.hazmat.bindings._rust
@@ -23,7 +29,6 @@ from typing import cast
 
 import traceback
 import inspect
-from pprint import pprint
 
 from OpenSSL import SSL as ossl
 
@@ -49,11 +54,10 @@ def format_names(n: str):
     return n.replace('_', '-')
 
 def stringify(e, depth=0):
-    if depth > 10:
+    if depth > 15:
         return 'depth exceeded'
+
     depth += 1
-    if isinstance(e, cryptography.x509.extensions.Extension):
-        return stringify(e.value, depth)
     if isinstance(e, cryptography.x509.ObjectIdentifier):
         oid = cast(cryptography.x509.ObjectIdentifier, e)
         result = {
@@ -69,14 +73,10 @@ def stringify(e, depth=0):
             'method': stringify(ad.access_method, depth),
             'location': stringify(ad.access_location, depth),
             } }
-    if isinstance(e, cryptography.x509.GeneralNames):
-        return [stringify(x, depth) for x in e._general_names]
-    if isinstance(e, cryptography.x509.GeneralName):
-        return e.value
-    if isinstance(e, cryptography.x509.SignedCertificateTimestamps):
-        return e.public_bytes().hex()
     if isinstance(e, cryptography.hazmat.primitives.hashes.HashAlgorithm):
         return e.name
+    if isinstance(e, cryptography.x509.GeneralName):
+        return stringify(e.value, depth)
     if isinstance(e, str):
         return e
     if isinstance(e, list):
@@ -94,19 +94,20 @@ def stringify(e, depth=0):
         result = {}
 
         if hasattr(e, 'public_bytes'):
-            result['public-bytes'] = e.public_bytes().hex()
+            if len(inspect.signature(e.public_bytes).parameters) == 1:
+                result['public-bytes'] = e.public_bytes().hex()
 
         for attr in dir(e):
             if not '__' in str(attr) and not str(attr) == '_abc_impl':
                 try:
                     val = getattr(e, attr)
-                    if not inspect.ismethod(val):
+                    if not inspect.isroutine(val) and not isinstance(val, frozenset):
                         result[format_names(str(attr))] = stringify(val, depth)
                 except Exception:
                     pass
 
         if result:
-            #result['type'] = str(type(e))
+            #result['__type'] = str(type(e))
             return result
 
     return str(e)
@@ -124,13 +125,19 @@ def dump_certs(host: str, port: int = 443, ciphers: str = None, ip: str = None):
     }
     status = 200
     try:
-        cryptography.hazmat.primitives.asymmetric.types.PublicKeyTypes
+        # all current types from cryptography.hazmat.primitives.asymmetric.types.PublicKeyTypes
         algorithms = {
+            cryptography.hazmat.primitives.asymmetric.dh.DHPublicKey: 'DH',
+            cryptography.hazmat.primitives.asymmetric.dsa.DSAPublicKey: 'DSA',
+            cryptography.hazmat.primitives.asymmetric.rsa.RSAPublicKey: 'RSA',
             cryptography.hazmat.primitives.asymmetric.ec.EllipticCurvePublicKey: 'Elliptic Curve',
-            cryptography.hazmat.primitives.asymmetric.rsa.RSAPublicKey: 'RSA'
+            cryptography.hazmat.primitives.asymmetric.ed25519.Ed25519PublicKey: 'Elliptic Curve Ed25519',
+            cryptography.hazmat.primitives.asymmetric.ed448.Ed448PublicKey: 'Elliptic Curve Ed448',
+            cryptography.hazmat.primitives.asymmetric.x25519.X25519PublicKey: 'Elliptic Curve X25519',
+            cryptography.hazmat.primitives.asymmetric.x448.X448PublicKey: 'Elliptic Curve X448',
         }
 
-        chain_der = []
+        chain = []
         if False:
             # get_unverified_chain call using pythons default crypto lib requires python 3.13,
             # Vercel only supports 3.12 at the time of writing ...
@@ -139,19 +146,19 @@ def dump_certs(host: str, port: int = 443, ciphers: str = None, ip: str = None):
             ctx.verify_mode = ssl.CERT_NONE
 
             with ctx.wrap_socket(socket.create_connection((ip if ip else host, port)), server_hostname=host) as ssock:
-                chain_der += ssock.get_unverified_chain()
+                chain += ssock.get_unverified_chain()
                 result['ip'] = ssock.getpeername()[0]
                 result['cipher-version'] = ssock.version()
                 ssock.close()
         else:
-            # ... so use the OpenSSL pip package to get certificate chain instead:
+            # ... so use the OpenSSL pip package to get the certificate chain instead:
             ctx = ossl.Context(ossl.TLS_CLIENT_METHOD)
 
             if ciphers:
                 ctx.set_cipher_list(ciphers.encode('ascii'))
                 # set_cipher_list does not work with tls1.3, like openssl -cipher doesn't work.
-                # You should use -ciphersuites instead but this API currently doesn't support it, so
-                # we instead disable tls 1.3.
+                # Should use -ciphersuites instead but the pyOpenSSL API currently doesn't support
+                # it, so we instead disable tls 1.3, see https://github.com/pyca/pyopenssl/issues/1224
                 ctx.set_options(ossl.OP_NO_TLSv1_3)
 
             ctx.set_verify(ossl.VERIFY_NONE) # interestingly, this is the default with pyOpenSSL ... oO
@@ -162,15 +169,15 @@ def dump_certs(host: str, port: int = 443, ciphers: str = None, ip: str = None):
             conn.set_connect_state()
             conn.do_handshake()
             result['ip'] = str(sock.getpeername()[0])
-            chain_der = conn.get_peer_cert_chain(as_cryptography=True)
             result['cipher-version'] = conn.get_cipher_version()
+            chain = conn.get_peer_cert_chain(as_cryptography=True)
             conn.close()
 
-        for cert_der in chain_der:
-            if isinstance(cert_der, cryptography.x509.Certificate):
-                cert = cert_der
+        for chain_cert in chain:
+            if isinstance(chain_cert, cryptography.x509.Certificate):
+                cert = chain_cert
             else:
-                cert = cryptography.x509.load_der_x509_certificate(cert_der)
+                cert = cryptography.x509.load_der_x509_certificate(chain_cert)
 
             pub_key = cert.public_key()
             algo_name = 'unknown'
@@ -194,6 +201,7 @@ def dump_certs(host: str, port: int = 443, ciphers: str = None, ip: str = None):
                         cryptography.hazmat.primitives.serialization.Encoding.PEM,
                         cryptography.hazmat.primitives.serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
                     'algorithm': algo_name,
+                    'details': stringify(pub_key)
                 },
                 'not-valid-before-utc': str(cert.not_valid_before_utc),
                 'not-valid-after-utc': str(cert.not_valid_after_utc),
